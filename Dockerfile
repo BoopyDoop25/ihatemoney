@@ -1,4 +1,4 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim as builder
 
 ENV PORT="8000" \
     # Keeps Python from generating .pyc files in the container
@@ -33,27 +33,37 @@ ENV DEBUG="False" \
 ADD . /src
 
 RUN echo "**** install build dependencies ****" &&\
-    apk add --no-cache --virtual=build-dependencies \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    musl-dev \
-    postgresql-dev &&\
-    echo "**** install runtime packages ****" && \
-    apk add --no-cache \
-    shadow \
-    postgresql-libs && \
+    libpq-dev
+
+ADD . /src
+
+RUN echo "**** install pip packages ****" && \
+    pip install --user --no-cache-dir \
+    gunicorn && \
+    pip install --user --no-cache-dir -e /src[database]
+
+
+FROM python:3.11-slim
+
+RUN echo "**** install runtime packages ****" && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 && \
     echo "**** create runtime folder ****" && \
     mkdir -p /etc/ihatemoney &&\
-    echo "**** install pip packages ****" && \
-    pip install --no-cache-dir \
-    gunicorn && \
-    pip install --no-cache-dir -e /src[database] && \
     echo "**** create user abc:abc ****" && \
     useradd -u 1000 -U -d /src abc && \
     echo "**** cleanup ****" && \
-    apk del --purge build-dependencies &&\
+    apt-get clean && \
     rm -rf \
-    /tmp/*
+    /tmp/* \
+    /var/lib/apt/lists/*
+
+COPY --from=builder /root/.local /home/abc/.local
 
 VOLUME /database
 EXPOSE ${PORT}
+USER abc
+ENV PATH=/home/abc/.local/bin:$PATH
 ENTRYPOINT ["/src/conf/entrypoint.sh"]
